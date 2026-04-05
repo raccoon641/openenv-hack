@@ -1,3 +1,13 @@
+---
+title: OpenEnv Redteaming
+emoji: 🔐
+colorFrom: red
+colorTo: orange
+sdk: docker
+app_file: app.py
+pinned: false
+---
+
 # OpenEnv Vulnerability Environment
 
 An **OpenEnv-compatible** reinforcement-learning environment for injection-based security tasks, paired with an LLM-driven agent that exploits those vulnerabilities through structured actions.
