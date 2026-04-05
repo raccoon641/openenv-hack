@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "openenv-vuln"
+version = "1.0.0"
+description = "OpenEnv-compatible injection-based vulnerability environment"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=1.0.0",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.29.0",
+    "pyyaml>=6.0",
+]
