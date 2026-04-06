@@ -31,8 +31,8 @@ from env import VulnEnv
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(
-    title="OpenEnv Vulnerability Environment",
-    description="Injection-based vulnerability tasks: SQLi, Auth Bypass, XSS",
+    title="OpenEnv Red-Team Environment",
+    description="Multi-step red-team tasks: SQL Injection, Spear-Phishing, Cloud Identity, AI Exploitation",
     version="1.0.0",
 )
 
@@ -111,7 +111,7 @@ def step(request: Dict[str, Any] = Body(...)):
     Apply a structured action.
 
     Accepts:
-        {"action": {"type": "input", "target": "query", "payload": "..."}}
+        {"action": {"type": "select", "target": "<tool_name>", "payload": ""}}
 
     Returns openenv-core format:
         {"observation": {...}, "reward": float, "done": bool}

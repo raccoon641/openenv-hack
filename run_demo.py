@@ -1,9 +1,7 @@
 """
-run_demo.py  –  End-to-end demonstration of all three vulnerability tasks.
+run_demo.py  –  End-to-end demonstration of all four red-team tasks.
 
-Each task is run twice:
-  1. Benign probe (partial/no reward)
-  2. Successful exploit (full reward)
+Runs each task with the optimal tool sequence, then shows a failure path.
 
 Run with:
     python run_demo.py
@@ -13,7 +11,7 @@ import json
 import sys
 import time
 
-sys.path.insert(0, __file__.rsplit("/", 1)[0])   # ensure local imports work
+sys.path.insert(0, __file__.rsplit("/", 1)[0])
 
 from env import VulnEnv
 
@@ -26,144 +24,93 @@ def _sep(label: str):
     print('─' * 60)
 
 
-def _show_step(step_num: int, action: dict, obs: dict, reward: float, done: bool, info: dict):
+def _show_step(step_num, action, obs, reward, done, info):
     print(f"\n  Step {step_num}")
     print(f"    action  : {json.dumps(action)}")
     print(f"    output  : {str(obs.get('recent_output', ''))[:120]}")
     print(f"    reward  : {reward:.4f}")
     print(f"    done    : {done}")
-    print(f"    exploit : {info['exploit_success']}")
-    print(f"    partial : {info['partial_score']:.4f}")
-    print(f"    alerts  : {obs['signals'].get('alerts', '')}")
+    print(f"    exploit : {info.get('exploit_success', False)}")
+    print(f"    partial : {info.get('partial_score', 0.0):.4f}")
 
 
-# ── SQL Injection ─────────────────────────────────────────────────────────────
-
-def demo_sql(env: VulnEnv):
-    _sep("TASK: sql_injection")
-
-    # -- Episode 1: benign probe --
-    print("\n[Episode 1] Benign probe (no injection)")
-    obs = env.reset("sql_injection")
-    print(f"  code_context snippet:\n    {obs['code_context'].splitlines()[1]}")
-
-    obs, r, done, info = env.step({"type": "input", "target": "query", "payload": "alice"})
-    _show_step(1, {"type": "input", "target": "query", "payload": "alice"}, obs, r, done, info)
-
-    # -- Episode 2: classic OR injection --
-    print("\n[Episode 2] Classic OR injection")
-    obs = env.reset("sql_injection")
-
-    steps = [
-        {"type": "input", "target": "query", "payload": "' OR '1'='1"},
-    ]
-    for i, action in enumerate(steps, 1):
-        obs, r, done, info = env.step(action)
-        _show_step(i, action, obs, r, done, info)
+def _run_episode(env, task_id, tools, label):
+    print(f"\n[{label}]")
+    obs = env.reset(task_id)
+    reward = 0.0
+    for i, tool in enumerate(tools, 1):
+        action = {"type": "select", "target": tool, "payload": ""}
+        obs, reward, done, info = env.step(action)
+        _show_step(i, action, obs, reward, done, info)
         if done:
             break
-
-    # -- Episode 3: UNION-based injection --
-    print("\n[Episode 3] UNION SELECT injection")
-    obs = env.reset("sql_injection")
-    action = {
-        "type": "input",
-        "target": "query",
-        "payload": "' UNION SELECT id,username,role,secret FROM users--",
-    }
-    obs, r, done, info = env.step(action)
-    _show_step(1, action, obs, r, done, info)
+    print(f"  Final reward: {reward:.4f}")
+    return reward
 
 
-# ── Auth Bypass ───────────────────────────────────────────────────────────────
+# ── SQL Injection (Easy, 3 steps) ───────────────────────────────────────────
 
-def demo_auth(env: VulnEnv):
-    _sep("TASK: auth_bypass")
+def demo_sql(env):
+    _sep("TASK: sql_injection (Easy)")
 
-    # -- Episode 1: wrong password --
-    print("\n[Episode 1] Wrong credentials (denied)")
-    obs = env.reset("auth_bypass")
+    _run_episode(env, "sql_injection",
+        ["submit_single_quote", "submit_or_true_payload", "submit_union_select_data"],
+        "Optimal path")
 
-    action = {"type": "input", "target": "login", "payload": "admin"}
-    obs, r, done, info = env.step(action)
-    _show_step(1, action, obs, r, done, info)
-
-    # -- Episode 2: eval injection --
-    print("\n[Episode 2] Python eval injection")
-    obs = env.reset("auth_bypass")
-
-    action = {"type": "input", "target": "login", "payload": "') or True or ('"}
-    obs, r, done, info = env.step(action)
-    _show_step(1, action, obs, r, done, info)
-
-    # -- Episode 3: multi-step (probe then exploit) --
-    print("\n[Episode 3] Multi-step: probe → exploit")
-    obs = env.reset("auth_bypass")
-
-    steps = [
-        {"type": "input", "target": "login", "payload": "alice"},          # valid user
-        {"type": "input", "target": "login", "payload": "admin"},          # wrong pw → denied
-        {"type": "input", "target": "login", "payload": "') or True or ('"}, # exploit
-    ]
-    for i, action in enumerate(steps, 1):
-        obs, r, done, info = env.step(action)
-        _show_step(i, action, obs, r, done, info)
-        if done:
-            break
+    _run_episode(env, "sql_injection",
+        ["run_sqlmap_full", "brute_force_password", "submit_stacked_query_drop"],
+        "Worst path (noisy + destructive)")
 
 
-# ── XSS Injection ─────────────────────────────────────────────────────────────
+# ── Spear-Phishing (Medium, 4 steps) ────────────────────────────────────────
 
-def demo_xss(env: VulnEnv):
-    _sep("TASK: xss_injection")
+def demo_spearphish(env):
+    _sep("TASK: spearphish_credential (Medium)")
 
-    # -- Episode 1: plain input (no injection) --
-    print("\n[Episode 1] Plain username (no injection)")
-    obs = env.reset("xss_injection")
+    _run_episode(env, "spearphish_credential",
+        ["send_macro_enabled_doc", "add_registry_run_key",
+         "query_domain_admins", "invoke_mimikatz_sekurlsa"],
+        "Optimal path")
 
-    action = {"type": "input", "target": "render", "payload": "alice::Hello world!"}
-    obs, r, done, info = env.step(action)
-    _show_step(1, action, obs, r, done, info)
-
-    # -- Episode 2: HTML tag injection (partial) --
-    print("\n[Episode 2] HTML tag injection (partial signal)")
-    obs = env.reset("xss_injection")
-
-    action = {"type": "input", "target": "render", "payload": "<b>alice</b>::<i>test</i>"}
-    obs, r, done, info = env.step(action)
-    _show_step(1, action, obs, r, done, info)
-
-    # -- Episode 3: full XSS exploit --
-    print("\n[Episode 3] Full XSS exploit (<script> injection)")
-    obs = env.reset("xss_injection")
-
-    steps = [
-        # Step 1: probe the surface
-        {"type": "input", "target": "render", "payload": "<b>probe</b>::test"},
-        # Step 2: escalate to script injection
-        {"type": "input", "target": "render",
-         "payload": "<script>alert('xss')</script>::pwned"},
-    ]
-    for i, action in enumerate(steps, 1):
-        obs, r, done, info = env.step(action)
-        _show_step(i, action, obs, r, done, info)
-        if done:
-            break
-
-    # -- Episode 4: event-handler XSS --
-    print("\n[Episode 4] Event-handler XSS (onerror)")
-    obs = env.reset("xss_injection")
-
-    action = {
-        "type": "input",
-        "target": "render",
-        "payload": "user::<img src=x onerror=alert(document.cookie)>",
-    }
-    obs, r, done, info = env.step(action)
-    _show_step(1, action, obs, r, done, info)
+    _run_episode(env, "spearphish_credential",
+        ["send_macro_enabled_doc", "dump_lsass_immediately",
+         "scan_entire_network_nmap", "run_mimikatz_with_defender_active"],
+        "Bad path (no persistence, noisy)")
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# ── Cloud Identity (Hard, 5 steps) ──────────────────────────────────────────
+
+def demo_cloud(env):
+    _sep("TASK: cloud_identity_intrusion (Hard)")
+
+    _run_episode(env, "cloud_identity_intrusion",
+        ["o365_user_enum", "password_spray_legacy_auth",
+         "enumerate_via_graph_api", "register_oauth_app_with_mail_read",
+         "graph_targeted_mail_search"],
+        "Optimal path")
+
+    _run_episode(env, "cloud_identity_intrusion",
+        ["nmap_scan", "mimikatz_lsass_dump", "bloodhound_sharphound",
+         "golden_ticket_creation", "graph_bulk_export_all_mail"],
+        "On-prem tools on cloud (all fail)")
+
+
+# ── AI Tool Exploitation (Hard, 4 steps) ────────────────────────────────────
+
+def demo_ai(env):
+    _sep("TASK: ai_tool_exploitation (Hard)")
+
+    _run_episode(env, "ai_tool_exploitation",
+        ["probe_via_benign_task", "embed_indirect_instruction_in_doc",
+         "instruct_find_sensitive_files", "instruct_exfil_via_legitimate_cloud"],
+        "Optimal path")
+
+    _run_episode(env, "ai_tool_exploitation",
+        ["inject_ignore_previous"],
+        "Jailbreak phrase (instant detection)")
+
+
+# ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
     env = VulnEnv()
@@ -172,8 +119,9 @@ def main():
     t0 = time.perf_counter()
 
     demo_sql(env)
-    demo_auth(env)
-    demo_xss(env)
+    demo_spearphish(env)
+    demo_cloud(env)
+    demo_ai(env)
 
     elapsed = time.perf_counter() - t0
     print(f"\n{'─'*60}")

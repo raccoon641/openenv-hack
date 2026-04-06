@@ -9,13 +9,14 @@ Implements the OpenEnv interface:
 
 Tasks
 -----
-    "sql_injection"  – SQLi via unsanitised string formatting
-    "auth_bypass"    – Auth bypass via Python eval injection
-    "xss_injection"  – XSS via unescaped HTML template rendering
+    "sql_injection"          – Multi-step web app SQL injection (Easy, 3 steps)
+    "spearphish_credential"  – Spear-phishing initial access to credential harvest (Medium, 4 steps)
+    "cloud_identity_intrusion" – Cloud identity compromise via legacy auth (Hard, 5 steps)
+    "ai_tool_exploitation"   – Agentic AI developer tool exploitation (Hard, 4 steps)
 
 Action schema
 -------------
-    {"type": "input"|"edit", "target": str, "payload": str}
+    {"type": "select", "target": "<tool_name>", "payload": "<json_params>"}
 
 Observation schema
 ------------------
@@ -120,7 +121,10 @@ class VulnEnv:
 
         # ── Apply action to task ─────────────────────────────────────────
         output = self._task.apply_action(clean_action)
-        self._step_count += 1
+
+        # Don't count invalid actions (unknown tool) against step budget
+        if not (isinstance(output, dict) and output.get("error")):
+            self._step_count += 1
 
         # ── Evaluate ─────────────────────────────────────────────────────
         reward, signals = self._task.evaluate()
@@ -128,6 +132,7 @@ class VulnEnv:
         # ── Termination ──────────────────────────────────────────────────
         self._done = (
             signals.get("exploit_success", False)
+            or signals.get("episode_done", False)
             or self._step_count >= self._task.max_steps
         )
 
