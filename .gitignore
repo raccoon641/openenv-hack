@@ -19,3 +19,7 @@ venv/
 # OS
 .DS_Store
 .env
+
+# Doc
+ENVIRONMENT.md
+TASK_DESIGN.md

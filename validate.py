@@ -186,12 +186,12 @@ try:
     else:
         fail(f"  only {len(task_ids)} task(s) — need ≥ 3")
 
-    # Probe payloads that should produce non-zero rewards (correct tool per step 1)
+    # Probe payloads — correct tool for phase/step 1 of each task
     PROBES = {
-        "sql_injection":          {"type": "select", "target": "submit_single_quote",          "payload": ""},
-        "spearphish_credential":  {"type": "select", "target": "send_macro_enabled_doc",       "payload": ""},
-        "cloud_identity_intrusion":{"type": "select", "target": "o365_user_enum",              "payload": ""},
-        "ai_tool_exploitation":   {"type": "select", "target": "probe_via_benign_task",        "payload": ""},
+        "sql_injection":           {"type": "select", "target": "send_request",           "payload": "'"},
+        "spearphish_credential":   {"type": "select", "target": "craft_delivery",         "payload": ""},
+        "cloud_identity_intrusion":{"type": "select", "target": "probe_accounts",         "payload": ""},
+        "ai_tool_exploitation":    {"type": "select", "target": "probe_via_benign_task",  "payload": ""},
     }
 
     for task_id in task_ids:
