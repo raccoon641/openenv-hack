@@ -12,7 +12,7 @@ Action schema
 
 from typing import Dict
 
-VALID_TYPES = {"input", "edit"}
+VALID_TYPES = {"input", "edit", "select"}
 MAX_PAYLOAD_LEN = 2048   # hard cap to prevent abuse
 
 

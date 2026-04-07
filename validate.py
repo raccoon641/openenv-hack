@@ -186,11 +186,12 @@ try:
     else:
         fail(f"  only {len(task_ids)} task(s) — need ≥ 3")
 
-    # Probe payloads that should produce non-zero rewards
+    # Probe payloads — correct tool for phase/step 1 of each task
     PROBES = {
-        "sql_injection": {"type": "input", "target": "query",  "payload": "' OR '1'='1"},
-        "auth_bypass":   {"type": "input", "target": "login",  "payload": "') or True or ('"},
-        "xss_injection": {"type": "input", "target": "render", "payload": "<script>alert(1)</script>::x"},
+        "sql_injection":           {"type": "select", "target": "submit_form_value",            "payload": ""},
+        "spearphish_credential":   {"type": "select", "target": "deliver_prepared_package",     "payload": ""},
+        "cloud_identity_intrusion":{"type": "select", "target": "test_identifier_responses",    "payload": ""},
+        "ai_tool_exploitation":    {"type": "select", "target": "submit_routine_request",       "payload": ""},
     }
 
     for task_id in task_ids:

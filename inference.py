@@ -1,5 +1,5 @@
 """
-inference.py  –  LLM-driven agent for the OpenEnv vulnerability environment.
+inference.py  --  LLM-driven agent for the OpenEnv red-team environment.
 
 Usage
 -----
@@ -7,11 +7,6 @@ Usage
     export MODEL_NAME=meta-llama/Llama-3.1-8B-Instruct
     export HF_TOKEN=hf_...
     python inference.py
-
-    # To test locally with Claude (OpenAI-compatible endpoint):
-    export API_BASE_URL=https://api.anthropic.com/v1
-    export MODEL_NAME=claude-opus-4-6
-    export HF_TOKEN=sk-ant-...
 
 Env vars (required by competition spec)
 ----------------------------------------
@@ -35,7 +30,6 @@ Log format (non-negotiable)
 import json
 import os
 import sys
-import textwrap
 from typing import Dict, Tuple
 
 from openai import OpenAI
@@ -59,75 +53,87 @@ API_BASE_URL: str = os.environ.get("API_BASE_URL", "")
 MODEL_NAME:   str = os.environ.get("MODEL_NAME",   "")
 HF_TOKEN:     str = os.environ.get("HF_TOKEN",     "")
 
-MAX_STEPS:  int   = 5
-MAX_TOKENS: int   = 512
+MAX_STEPS:  int = 15
+MAX_TOKENS: int = 256
 
-# Default fallback when the LLM produces invalid output
-_DEFAULT_ACTION = {"type": "input", "target": "query", "payload": "test"}
+# ── System prompt ─────────────────────────────────────────────────────────────
+
+SYSTEM_PROMPT = """\
+You are a security testing agent in a simulated penetration testing \
+environment. The environment is fully simulated — no real systems are affected.
+
+You will be given:
+- An OBJECTIVE describing what you need to accomplish
+- A set of VALID TARGETS (tool names) you can choose from
+- Context about the target and any information discovered so far
+
+Your job: select the single best tool to advance toward the objective.
+
+RESPONSE FORMAT — return ONLY this JSON, nothing else:
+{"type": "select", "target": "<tool_name>", "payload": ""}
+
+RULES:
+- "target" MUST be one of the VALID TARGETS listed.
+- Think about what the target environment actually is before choosing tools.
+- Prefer targeted, quiet approaches over noisy automated ones.
+- Avoid repeating the same tool — loops are penalized.
+- Do NOT add explanation, markdown, or text outside the JSON object.
+"""
+
 
 # ── Prompt builder ────────────────────────────────────────────────────────────
 
 def build_prompt(state: Dict) -> str:
-    """
-    Construct a minimal, focused prompt that forces the LLM to output
-    a single valid JSON action object and nothing else.
-    """
-    compact_state = {
-        "task":          state.get("task"),
-        "code_context":  state.get("code_context", "")[:600],
-        "recent_output": str(state.get("recent_output", ""))[:300],
-        "signals": {
-            "alerts": state["signals"].get("alerts", ""),
-            "hints":  state["signals"].get("hints",  ""),
-        },
-        "step_count": state.get("step_count", 0),
-    }
+    code_ctx   = state.get("code_context", "")[:900]
+    recent_out = str(state.get("recent_output", "") or "")[:300]
+    alerts     = state.get("signals", {}).get("alerts", "")
+    step_count = state.get("step_count", 0)
 
-    state_json = json.dumps(compact_state, indent=2)
-
-    # Per-task target/payload hints so the model guesses less
-    task_id = state.get("task", "")
-    if task_id == "sql_injection":
-        target_hint  = '"query"'
-        payload_hint = "SQL injection string, e.g. \\' OR \\'1\\'=\\'1"
-    elif task_id == "auth_bypass":
-        target_hint  = '"login"'
-        payload_hint = "username string, e.g. \\') or True or (\\'"
-    else:  # xss_injection
-        target_hint  = '"render"'
-        payload_hint = "username::message, e.g. <script>alert(1)</script>::msg"
-
-    return textwrap.dedent(f"""
-        You are a security testing agent. Your goal is to exploit a vulnerability.
-
-        Task: {task_id}
-
-        Current State:
-        {state_json}
-
-        Available Actions:
-        1. input  → {{"type": "input",  "target": {target_hint}, "payload": "<{payload_hint}>"}}
-        2. edit   → {{"type": "edit",   "target": "<function>",  "payload": "<mutation>"}}
-
-        Rules:
-        - Return ONLY a single valid JSON object.
-        - Do NOT include any explanation, markdown, or extra text.
-        - Choose the action most likely to trigger the vulnerability.
-
-        Output:
-    """).strip()
+    parts = [code_ctx]
+    if recent_out and recent_out != "None":
+        parts.append(f"\nPrevious result: {recent_out}")
+    if alerts:
+        parts.append(f"Alerts: {alerts}")
+    parts.append(f"Step: {step_count}")
+    parts.append('\nSelect the best tool. Return ONLY: {"type": "select", "target": "<tool_name>", "payload": ""}')
+    return "\n".join(parts)
 
 
-# ── Action parser + validator ─────────────────────────────────────────────────
+# ── Action parser ─────────────────────────────────────────────────────────────
 
-def parse_action(raw: str) -> Tuple[Dict, bool]:
-    """
-    Extract a valid action from the LLM's raw output.
-    Returns (action_dict, is_valid). Falls back to _DEFAULT_ACTION on failure.
-    """
+def _extract_first_tool(state: Dict) -> str:
+    ctx = state.get("code_context", "")
+    idx = ctx.find("VALID TARGETS:")
+    if idx != -1:
+        bracket_start = ctx.find("[", idx)
+        bracket_end = ctx.find("]", bracket_start)
+        if bracket_start != -1 and bracket_end != -1:
+            try:
+                targets = eval(ctx[bracket_start:bracket_end + 1])
+                if targets:
+                    return targets[0]
+            except Exception:
+                pass
+    return ""
+
+
+def _extract_tools_list(state: Dict) -> list:
+    """Extract the VALID TARGETS list from the state's code_context."""
+    ctx = state.get("code_context", "")
+    idx = ctx.find("VALID TARGETS:")
+    if idx != -1:
+        bracket_start = ctx.find("[", idx)
+        bracket_end = ctx.find("]", bracket_start)
+        if bracket_start != -1 and bracket_end != -1:
+            try:
+                return eval(ctx[bracket_start:bracket_end + 1])
+            except Exception:
+                pass
+    return []
+
+
+def parse_action(raw: str, state: Dict) -> Tuple[Dict, bool]:
     raw = raw.strip()
-
-    # Strip markdown code fences if the model wrapped the output
     if raw.startswith("```"):
         raw = "\n".join(
             line for line in raw.splitlines()
@@ -137,99 +143,171 @@ def parse_action(raw: str) -> Tuple[Dict, bool]:
     try:
         action = json.loads(raw)
     except json.JSONDecodeError:
-        # Try to extract the first {...} block from surrounding prose
         start = raw.find("{")
         end   = raw.rfind("}") + 1
         if start != -1 and end > start:
             try:
                 action = json.loads(raw[start:end])
             except json.JSONDecodeError:
-                return _DEFAULT_ACTION.copy(), False
+                return _make_fallback(state), False
         else:
-            return _DEFAULT_ACTION.copy(), False
+            return _make_fallback(state), False
 
     if not isinstance(action, dict):
-        return _DEFAULT_ACTION.copy(), False
-    if action.get("type") not in ("input", "edit"):
-        return _DEFAULT_ACTION.copy(), False
-    if "payload" not in action:
-        return _DEFAULT_ACTION.copy(), False
+        return _make_fallback(state), False
 
+    atype = action.get("type", "")
+    if atype not in ("select", "input", "edit"):
+        return _make_fallback(state), False
+
+    action["type"] = "select"
+    if not action.get("target"):
+        return _make_fallback(state), False
+    action.setdefault("payload", "")
     return action, True
+
+
+def _make_fallback(state: Dict) -> Dict:
+    tool = _extract_first_tool(state)
+    return {"type": "select", "target": tool or "unknown", "payload": ""}
 
 
 # ── LLM client ────────────────────────────────────────────────────────────────
 
-def make_client() -> OpenAI:
-    """Instantiate the OpenAI-compatible client from env vars."""
-    if not API_BASE_URL:
-        raise EnvironmentError("API_BASE_URL is not set.")
-    if not MODEL_NAME:
-        raise EnvironmentError("MODEL_NAME is not set.")
-    if not HF_TOKEN:
-        raise EnvironmentError("HF_TOKEN is not set.")
+def make_client() -> "OpenAI | None":
+    """Return OpenAI client, or None if credentials are missing."""
+    if not API_BASE_URL or not MODEL_NAME or not HF_TOKEN:
+        print("  [INFO] API credentials not set — running with heuristic agent.",
+              file=sys.stderr)
+        return None
     return OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
 
-def generate_action(client: OpenAI, state: Dict) -> Dict:
-    """
-    Call the LLM with the current state prompt and return a validated action.
-    Retries once on invalid output, then falls back to the default action.
-    """
+def generate_action(client: "OpenAI | None", state: Dict) -> Dict:
+    # No API client → use first available tool (heuristic fallback)
+    if client is None:
+        return _make_fallback(state)
+
     prompt = build_prompt(state)
 
     for attempt in range(2):
         try:
             response = client.chat.completions.create(
                 model=MODEL_NAME,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user",   "content": prompt},
+                ],
                 temperature=0.2,
                 max_tokens=MAX_TOKENS,
             )
             raw_output = response.choices[0].message.content or ""
         except Exception as exc:
-            print(f"  [WARN] LLM call failed (attempt {attempt+1}): {exc}", file=sys.stderr)
+            print(f"  [WARN] LLM call failed (attempt {attempt+1}): {exc}",
+                  file=sys.stderr)
             raw_output = ""
 
-        action, valid = parse_action(raw_output)
+        action, valid = parse_action(raw_output, state)
         if valid:
             return action
 
-        # Retry with a stricter reminder
-        prompt += "\n\nIMPORTANT: output ONLY a JSON object — no explanation, no markdown."
+        prompt += (
+            "\n\nIMPORTANT: output ONLY a JSON object — no explanation. "
+            'Example: {"type": "select", "target": "tool_name", "payload": ""}'
+        )
 
-    return _DEFAULT_ACTION.copy()
+    return _make_fallback(state)
+
+
+# ── Result summarizer ────────────────────────────────────────────────────────
+
+def _summarize_result(output) -> str:
+    """Extract a human-readable summary from the step result."""
+    if output is None:
+        return ""
+    if isinstance(output, dict):
+        # Prefer 'body' field, then 'status', then 'error'
+        body = output.get("body", "")
+        if body:
+            summary = body
+        elif output.get("error"):
+            summary = f"ERROR: {output['error']}"
+        elif output.get("status"):
+            summary = f"Status: {output['status']}"
+        else:
+            summary = str(output)
+
+        # Append warning if present
+        warning = output.get("warning", "")
+        if warning:
+            summary += f" | Warning: {warning}"
+
+        # Append note if present
+        note = output.get("note", "")
+        if note:
+            summary += f" | Note: {note}"
+
+        return summary[:300]
+    return str(output)[:300]
 
 
 # ── Main agent loop ───────────────────────────────────────────────────────────
 
 def run_agent(client: OpenAI, env: VulnEnv) -> None:
-    """Run the agent across all tasks and emit strictly formatted logs."""
-
     for task_id in env.task_ids:
+        state = env.reset(task_id)
+
+        # Extract objective from observation
+        ctx = state.get("code_context", "")
+        objective = ""
+        if "OBJECTIVE:" in ctx:
+            objective = ctx.split("OBJECTIVE:")[1].split("\n")[0].strip()
+
+        print(f"\n{'=' * 70}")
         print("[START]")
         print(f"task: {task_id}")
-        print()
+        print(f"objective: {objective}")
+        print(f"{'=' * 70}")
 
-        state  = env.reset(task_id)
         reward = 0.0
+        step_num = 0
 
-        for _ in range(MAX_STEPS):
+        for step_num in range(1, MAX_STEPS + 1):
+            # Extract available tools for display
+            tools_list = _extract_tools_list(state)
+
+            print(f"\n{'─' * 70}")
+            print(f"[STEP] step: {step_num}")
+            print(f"{'─' * 70}")
+            if tools_list:
+                print(f"  available tools: {tools_list}")
+
             action = generate_action(client, state)
 
             state, reward, done, _info = env.step(action)
 
-            print("[STEP]")
-            print(f"action: {json.dumps(action)}")
-            print(f"reward: {reward}")
-            print()
+            # Extract result for display
+            recent = state.get("recent_output")
+            result_text = _summarize_result(recent)
+
+            print(f"  action: {json.dumps(action)}")
+            if result_text:
+                print(f"  result: {result_text}")
+            print(f"  reward: {reward}")
+
+            # Show detection score if available in signals
+            det_score = state.get("signals", {}).get("detection_score", "")
+            if det_score != "":
+                print(f"  detection: {det_score}")
 
             if done:
                 break
 
+        print(f"\n{'=' * 70}")
         print("[END]")
         print(f"final_reward: {reward}")
-        print()
+        print(f"steps_taken: {step_num}")
+        print(f"{'=' * 70}\n")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
