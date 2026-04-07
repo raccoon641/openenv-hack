@@ -128,6 +128,8 @@ class VulnEnv:
 
         # ── Evaluate ─────────────────────────────────────────────────────
         reward, signals = self._task.evaluate()
+        # Scores must be strictly in (0, 1) — clamp so display format never shows 0.00/1.00
+        reward = max(0.01, min(0.99, reward))
 
         # ── Termination ──────────────────────────────────────────────────
         self._done = (
