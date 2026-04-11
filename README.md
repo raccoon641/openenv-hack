@@ -283,29 +283,6 @@ Each step prints the **full context given to the model** before showing its choi
 
 ---
 
-## Known Issues
-
-1. **`final_reward` tag missing from `inference.py`** — The `log_end()` function outputs `[END] success=... steps=... score=...` but does not include a `final_reward=<score>` field. The validator (`validate.py`) checks for this string and will report a failure. **Fix:** add `final_reward={score:.3f}` to the `log_end()` output format string.
-
-2. **`.env` security** — Ensure the `.env` file at the repo root (containing API tokens) is never committed to version control. It is listed in `.gitignore` but verify with `git ls-files .env` that it is not tracked.
-
----
-
-## Evaluation Self-Assessment
-
-Self-assessment against the OpenEnv hackathon judging criteria:
-
-| Criterion | Weight | Self-Rating | Justification |
-|---|---|---|---|
-| **Real-world utility** | 30% | 22/30 | All tasks grounded in documented campaigns (OWASP, MITRE ATT&CK G0046, CISA AA24-057A, Anthropic 2025). Tests sequential reasoning under irreversible consequences — a gap in current RL benchmarks. Docked: tool-selection-only (payload ignored) reduces fidelity to actual pentesting. |
-| **Task & grader quality** | 25% | 20/25 | 4 tasks with Easy → Hard progression. Fully deterministic grading (same tool = same reward). Weighted phase rewards provide smooth partial credit. Docked: grading is lookup-table based, not actual vulnerability exploitation. |
-| **Environment design** | 20% | 15/20 | Clean `reset()` / `step()` lifecycle. State-dependent dynamics (WAF activation, session death, FSM detection). Detection penalties create rich reward signal beyond pass/fail. Docked: narrow action space (tool name selection only). |
-| **Code quality & spec** | 15% | 10/15 | Clean separation (`env.py`, `tasks/`, `evaluators/`, `utils/`). OpenEnv spec compliant (`openenv.yaml`). Dockerfile builds. Known bug: `final_reward` log tag missing (see Known Issues). |
-| **Creativity & novelty** | 10% | 8/10 | Novel domain — no cybersecurity red-team env in OpenEnv. Task 4 (AI exploitation via indirect prompt injection) based on emerging 2025 threat intelligence. FSM-based victim agent is fully reproducible. |
-| **Estimated total** | **100%** | **75/100** | |
-
----
-
 ## File Structure
 
 ```
