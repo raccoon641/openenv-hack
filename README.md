@@ -112,58 +112,6 @@ python run_demo.py
 
 ---
 
-## Local LLM Benchmarking
-
-This environment uses an OpenAI-compatible chat completions API. Any model served behind such an API works with **zero code changes** — only environment variables differ.
-
-### Model Configuration
-
-Set these before running `python inference.py`:
-
-**Gemma 4 (HuggingFace Router)**
-```bash
-export API_BASE_URL=https://router.huggingface.co/v1
-export MODEL_NAME=google/gemma-4-27b-it
-export HF_TOKEN=<your-hf-token>
-```
-
-**Qwen 2.5 (HuggingFace Router — default)**
-```bash
-export API_BASE_URL=https://router.huggingface.co/v1
-export MODEL_NAME=Qwen/Qwen2.5-72B-Instruct
-export HF_TOKEN=<your-hf-token>
-```
-
-**Llama 3.1 (local via Ollama)**
-```bash
-export API_BASE_URL=http://localhost:11434/v1
-export MODEL_NAME=llama3.1:70b
-export HF_TOKEN=not-needed
-```
-
-**GPT-OSS 20B (local via vLLM)**
-```bash
-export API_BASE_URL=http://localhost:8000/v1
-export MODEL_NAME=gpt-oss-20b
-export HF_TOKEN=not-needed
-```
-
-> **Note:** Exact model IDs vary by serving platform. For Ollama use `model:size` format. For vLLM use the model name passed to `--model` at launch. For HuggingFace Router use the full `org/model` repo ID.
-
-### Results Comparison
-
-| Model | sql_injection | spearphish_credential | cloud_identity_intrusion | ai_tool_exploitation | Avg Score |
-|---|---|---|---|---|---|
-| Gemma 4 27B | — | — | — | — | — |
-| Qwen 2.5 72B | — | — | — | — | — |
-| Llama 3.1 70B | — | — | — | — | — |
-| GPT-OSS 20B | — | — | — | — | — |
-| *Optimal (demo)* | *0.99* | *0.94* | *0.825* | *0.99* | *0.936* |
-
-Replace `—` with actual scores after running each model. Run `python run_demo.py` to verify optimal scores.
-
----
-
 ## Tasks
 
 ### 1. `sql_injection` (Easy)
